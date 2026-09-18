@@ -1,0 +1,33 @@
+{
+  "name": "rhf-v8-useform-identity-repro",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Minimal repro: react-hook-form v8 useForm() return value is no longer referentially stable, causing infinite useEffect loops",
+  "scripts": {
+    "dev": "vite",
+    "test": "vitest run",
+    "test:v7": "npm run -s use:v7 && vitest run",
+    "test:v8": "npm run -s use:v8 && vitest run",
+    "use:v7": "npm i --no-save --silent react-hook-form@7.87.0 && npm run -s which",
+    "use:v8": "npm i --no-save --silent react-hook-form@8.0.0-beta.3 && npm run -s which",
+    "which": "node -p \"'using react-hook-form ' + require('./node_modules/react-hook-form/package.json').version\""
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-hook-form": "8.0.0-beta.3"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
