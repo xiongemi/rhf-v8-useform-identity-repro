@@ -22,7 +22,9 @@ npm run dev       # live demo in the browser
 ```
 
 `test:v7` / `test:v8` swap only `react-hook-form` (`npm i --no-save`); nothing
-else in the project changes.
+else in the project changes. Each leaves that version installed — `npm run
+which` prints the current one, and `npm install` restores the pinned
+`8.0.0-beta.3`.
 
 ## Result
 
