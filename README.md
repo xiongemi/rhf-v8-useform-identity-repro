@@ -143,5 +143,46 @@ lint suppression) or replaced with `control`-based equivalents.
 | `src/infinite-loop.test.tsx` | the two runaway-effect patterns |
 | `src/workaround.test.tsx` | the suggested workaround, green on both versions |
 | `src/App.tsx` | live browser demo of both |
+| `src/required-controlled.test.tsx` | second finding: built-in `required` fires on a controlled field whose `field.ref` is attached to an always-empty input |
+| `src/required-native.test.tsx` | regression guard for any fix to `isEmpty` — `required` must keep firing for empty *uncontrolled* text and number inputs |
+
+## A candidate fix for the `required` finding
+
+Verified by patching the installed `8.0.0-beta.3` bundle and re-running the
+suite. Two candidates:
+
+| | `required-controlled` (the bug) | `required-native` (must keep passing) |
+|---|---|---|
+| unpatched `8.0.0-beta.3` | ❌ fail | ✅ pass |
+| **A.** `&& isUndefined(inputValue)` on the DOM branch | ✅ pass | ❌ **fail** |
+| **B.** flag controller fields, skip the DOM branch | ✅ pass | ✅ pass |
+
+**A is a trap.** It looks like the obvious one-line fix, but an empty
+`type="number"` field with `valueAsNumber` has a form value of `NaN`, not `''`
+— so the DOM branch is the *only* clause that catches it, and gating that
+branch on `isUndefined(inputValue)` silently stops `required` firing there.
+
+**B** keeps v8's new "`field.ref` is the real DOM node" behaviour while
+restoring v7's validation semantics, by recording that a field is
+Controller-managed (so form state, not the DOM, is authoritative):
+
+```diff
+  // src/useController.ts -- in the ref callback and the mount effect
+  if (field && field._f && elm) {
+    field._f.ref = _proxyRef.current;
++   field._f.isController = true;
+  }
+
+  // src/logic/validateField.ts
+- (isHTMLElement(ref) && ref.value === '') ||
++ (isHTMLElement(ref) && ref.value === '' && !isController) ||
+
+  // src/types/fields.ts -- Field._f
++ isController?: boolean;
+```
+
+Neither candidate affects the identity/loop specs, which is the clearest
+evidence that the two findings are independent: the identity churn is a
+deliberate design change, not a side effect of this one.
 
 Environment: React 19.3.0, jsdom, Vitest. Reproduced on macOS / Node 22.
