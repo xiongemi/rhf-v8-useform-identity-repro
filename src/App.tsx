@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- read at runtime purely to label the page
+// read at runtime purely to label the page
 import pkg from 'react-hook-form/package.json';
 
 type Values = { a: string };
