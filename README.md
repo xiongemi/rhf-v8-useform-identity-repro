@@ -97,8 +97,9 @@ than a synchronous `setState` cascade. In a real app it just spins and pins the
 CPU. Both the tests and the browser demo therefore install an explicit circuit
 breaker; without it neither terminates.
 
-(In a large suite it surfaces as a hang plus thousands of depth warnings — the
-migration this came from hit 6,634 of them from a single component.)
+(In a large test suite it surfaces as a hang plus thousands of depth warnings
+rather than a clean failure, which makes it easy to misattribute to the test
+runner.)
 
 ## Is this intentional?
 
