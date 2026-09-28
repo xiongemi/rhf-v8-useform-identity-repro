@@ -4,76 +4,91 @@ Minimal reproduction for
 [react-hook-form#12333](https://github.com/react-hook-form/react-hook-form/pull/12333)
 (["the `useForm` identity change and the potential infinite effect loops"](https://github.com/react-hook-form/react-hook-form/pull/12333#issuecomment-5704356408)).
 
-In `8.0.0-beta.3`, `useForm()`'s return value — and four of its methods — get a
-**new identity on every form-state change**. In `7.87.0` they keep one identity
-for the life of the component. Any `useEffect` that lists one in its dependency
-array therefore re-runs on every keystroke in v8, and **loops forever** if it
-also writes to the form.
+**Status as of `8.0.0-beta.4`** (published 2026-09-26): partially fixed.
+`useForm()`'s return value keeps one identity again — the re-spread was removed
+— and the `required`-on-controlled-fields finding is fixed. But four methods
+(`getValues`, `watch`, `register`, `getFieldState`) are still **re-bound on
+every form-state change**, so any `useEffect` that lists one of them in its
+dependency array still re-runs on every keystroke.
+
+In `8.0.0-beta.3` it was worse: the whole return object *and* the four methods
+got a new identity per form-state change, so an effect keyed on `[form]` that
+also wrote to the form **looped forever**. In `7.87.0` everything keeps one
+identity for the life of the component.
 
 ## Run it
 
 ```bash
 npm install
 
-npm run test:v8   # 3 failed | 1 passed  -- reproduces
-npm run test:v7   # 4 passed              -- same specs, only the version differs
+npm run test:v8        # 8.0.0-beta.4: 2 failed | 4 passed  -- methods still churn
+npm run test:v8beta3   # 8.0.0-beta.3: 4 failed | 2 passed  -- object churned too
+npm run test:v7        # 7.87.0:       6 passed             -- same specs, only the version differs
+```
 
+```bash
 npm run dev       # live demo in the browser
 ```
 
-`test:v7` / `test:v8` swap only `react-hook-form` (`npm i --no-save`); nothing
+The `test:*` scripts swap only `react-hook-form` (`npm i --no-save`); nothing
 else in the project changes. Each leaves that version installed — `npm run
 which` prints the current one, and `npm install` restores the pinned
-`8.0.0-beta.3`.
+`8.0.0-beta.4`.
 
 ## Result
 
-Same three specs, same React 19, only the `react-hook-form` version differs:
+Same six specs, same React 19, only the `react-hook-form` version differs:
 
-| | `7.87.0` | `8.0.0-beta.3` |
-|---|---|---|
-| `useForm()` keeps one identity | ✅ pass | ❌ **fail** |
-| `reset` effect keyed on `[form]` runs once | ✅ pass (1 run) | ❌ **fail** (runs forever) |
-| effect keyed on `[getValues]` runs once | ✅ pass (1 run) | ❌ **fail** (7 runs / 5 keystrokes) |
-| workaround: effect keyed on destructured `[reset]` | ✅ pass | ✅ pass |
+| | `7.87.0` | `8.0.0-beta.3` | `8.0.0-beta.4` |
+|---|---|---|---|
+| `useForm()` return value keeps one identity | ✅ | ❌ | ✅ **fixed** |
+| the four re-bound methods keep one identity | ✅ | ❌ | ❌ **still fails** |
+| `reset` effect keyed on `[form]` runs once | ✅ (1 run) | ❌ (runs forever) | ✅ **fixed** (1 run) |
+| effect keyed on `[getValues]` runs once | ✅ (1 run) | ❌ (7 runs / 5 keystrokes) | ❌ **still fails** (7 runs) |
+| workaround: effect keyed on destructured `[reset]` | ✅ | ✅ | ✅ |
+| `required` on a controlled field with `field.ref` attached | ✅ | ❌ | ✅ **fixed** |
+| `required` on empty native text/number inputs | ✅ | ✅ | ✅ |
 
 ### Distinct identities observed across 7 renders
 
 Typing 5 characters into one subscribed field (`src/identity.test.tsx`):
 
-| | `7.87.0` | `8.0.0-beta.3` |
-|---|---|---|
-| renders | 7 | 7 |
-| `useForm()` return value | **1** | **7** |
-| `getValues` | **1** | **7** |
-| `watch` | **1** | **7** |
-| `register` | **1** | **7** |
-| `getFieldState` | **1** | **7** |
-| `control` | 1 | 1 |
-| `reset` | 1 | 1 |
-| `handleSubmit` | 1 | 1 |
+| | `7.87.0` | `8.0.0-beta.3` | `8.0.0-beta.4` |
+|---|---|---|---|
+| renders | 7 | 7 | 7 |
+| `useForm()` return value | **1** | 7 | **1** |
+| `getValues` | **1** | 7 | 7 |
+| `watch` | **1** | 7 | 7 |
+| `register` | **1** | 7 | 7 |
+| `getFieldState` | **1** | 7 | 7 |
+| `control` | 1 | 1 | 1 |
+| `reset` | 1 | 1 | 1 |
+| `handleSubmit` | 1 | 1 | 1 |
 
-Exactly one new identity per render on v8. `control` and the methods that are
-not re-bound stay stable on both — which is what makes the workaround below
+beta.4 stabilised the object itself, which is what stops the `[form]`-keyed
+infinite loop. The four re-bound methods still get exactly one new identity
+per render — and because they are **re-bound in place on the (now stable)
+object**, destructuring them does not help: `const { getValues } = form` still
+yields a fresh function each render. `control` and the methods that are never
+re-bound stay stable on all versions, which is what makes the workaround below
 work.
 
 ## Cause
 
-`useForm` re-spreads the ref'd methods object inside a `useMemo` keyed on
-`formState`, and re-binds four methods each time:
+`useForm` re-binds four methods inside a `useMemo` keyed on `formState`:
 
 ```js
-// v8.0.0-beta.3 — src/useForm.ts
-function updateMethodsReference(_formControl) {
+// v8.0.0-beta.4 — src/utils/updateMethodsReference.ts
+export function updateMethodsReference(_formControl) {
   if (_formControl.current) {
     _formControl.current.getFieldState = _formControl.current.getFieldState.bind({});
     _formControl.current.watch         = _formControl.current.watch.bind({});
     _formControl.current.getValues     = _formControl.current.getValues.bind({});
     _formControl.current.register      = _formControl.current.register.bind({});
-    _formControl.current = { ..._formControl.current };   // ← new identity
   }
 }
 
+// v8.0.0-beta.4 — src/useForm.ts
 return React.useMemo(() => {
   updateMethodsReference(_formControl);                   // ← on every formState change
   if (_formControl.current) {
@@ -86,16 +101,23 @@ return React.useMemo(() => {
 `formState` is React state, so it changes on every subscribed notification —
 i.e. every keystroke under `mode: 'onChange'`.
 
-In `7.87.0` there is no `updateMethodsReference`; the same ref'd object is
-returned each render, which is why the dependency-array pattern was safe.
+beta.3 additionally ended `updateMethodsReference` with
+`_formControl.current = { ..._formControl.current }`, giving the whole return
+object a new identity too; beta.4 removed that line, which is the partial fix.
 
-## Why it loops rather than throwing
+In `7.87.0` there is no `updateMethodsReference`; the same ref'd object with
+the same methods is returned each render, which is why the dependency-array
+pattern was safe.
 
-The runaway effect does **not** trip React's *"Maximum update depth exceeded"*
-guard, because each pass goes through react-hook-form's own subscription rather
-than a synchronous `setState` cascade. In a real app it just spins and pins the
-CPU. Both the tests and the browser demo therefore install an explicit circuit
-breaker; without it neither terminates.
+## Why beta.3 looped rather than throwing
+
+The runaway `[form]`-keyed effect did **not** trip React's *"Maximum update
+depth exceeded"* guard, because each pass goes through react-hook-form's own
+subscription rather than a synchronous `setState` cascade. In a real app it
+just spins and pins the CPU. Both the tests and the browser demo therefore
+install an explicit circuit breaker; on beta.3, without it, neither
+terminates. (On beta.4 the `[form]`-keyed effect no longer loops; the breaker
+is kept so the suite stays safe to run against beta.3.)
 
 (In a large test suite it surfaces as a hang plus thousands of depth warnings
 rather than a clean failure, which makes it easy to misattribute to the test
@@ -106,18 +128,20 @@ runner.)
 Plausibly — it looks like the immutability work for
 [#12298](https://github.com/react-hook-form/react-hook-form/issues/12298)
 (React Compiler correctness), since mutating a hook's return value is exactly
-what that issue is about.
+what that issue is about. beta.4 removing only the object re-spread while
+keeping the per-render re-binds suggests the re-binds are deliberate.
 
 If so, the request is just that it be called out as a ⚠️ breaking change in the
 migration guide: v7's docs describe these as memoized, `exhaustive-deps`
 actively tells you to write the dependency array that now breaks, and the
-failure mode is a silent infinite loop rather than a type or lint error.
+failure mode is a silent re-run (or on beta.3, an infinite loop) rather than a
+type or lint error.
 
 ### Workaround, for the guide
 
-Depend on the individual methods that are **not** re-bound (`reset`, `setValue`,
-`trigger`, `clearErrors`, `setError`, `handleSubmit`, `control`) rather than on
-the methods object:
+Depend on the individual methods that are **not** re-bound (`reset`,
+`setValue`, `trigger`, `clearErrors`, `setError`, `handleSubmit`, `control`)
+rather than on the methods object:
 
 ```diff
 -const form = useForm({ defaultValues: DEFAULTS });
@@ -131,10 +155,13 @@ the methods object:
 +}, [reset, DEFAULTS]);
 ```
 
+(On beta.4 keying on `[form]` itself also works again, since the object is
+stable — but the destructured form is the one that is safe on both betas.)
+
 Note this does *not* work for `getValues` / `watch` / `register` /
-`getFieldState` — those are re-bound, so destructuring them still yields a fresh
-identity each render. They have to be left out of the dependency array (with a
-lint suppression) or replaced with `control`-based equivalents.
+`getFieldState` — those are re-bound, so destructuring them still yields a
+fresh identity each render. They have to be left out of the dependency array
+(with a lint suppression) or replaced with `control`-based equivalents.
 
 ## Files
 
@@ -142,48 +169,46 @@ lint suppression) or replaced with `control`-based equivalents.
 |---|---|
 | `src/identity.test.tsx` | counts distinct identities across renders |
 | `src/infinite-loop.test.tsx` | the two runaway-effect patterns |
-| `src/workaround.test.tsx` | the suggested workaround, green on both versions |
+| `src/workaround.test.tsx` | the suggested workaround, green on all versions |
 | `src/App.tsx` | live browser demo of both |
-| `src/required-controlled.test.tsx` | second finding: built-in `required` fires on a controlled field whose `field.ref` is attached to an always-empty input |
-| `src/required-native.test.tsx` | regression guard for any fix to `isEmpty` — `required` must keep firing for empty *uncontrolled* text and number inputs |
+| `src/required-controlled.test.tsx` | second finding, **fixed in beta.4**: built-in `required` fired on a controlled field whose `field.ref` is attached to an always-empty input |
+| `src/required-native.test.tsx` | regression guard for the `required` fix — `required` must keep firing for empty *uncontrolled* text and number inputs |
 
-## A candidate fix for the `required` finding
+## The `required` finding — fixed in beta.4
 
-Verified by patching the installed `8.0.0-beta.3` bundle and re-running the
-suite. Two candidates:
+This repo's README previously proposed two candidate fixes, verified by
+patching the installed beta.3 bundle:
 
 | | `required-controlled` (the bug) | `required-native` (must keep passing) |
 |---|---|---|
 | unpatched `8.0.0-beta.3` | ❌ fail | ✅ pass |
 | **A.** `&& isUndefined(inputValue)` on the DOM branch | ✅ pass | ❌ **fail** |
 | **B.** flag controller fields, skip the DOM branch | ✅ pass | ✅ pass |
+| `8.0.0-beta.4` (ships **B**) | ✅ **pass** | ✅ **pass** |
 
-**A is a trap.** It looks like the obvious one-line fix, but an empty
-`type="number"` field with `valueAsNumber` has a form value of `NaN`, not `''`
-— so the DOM branch is the *only* clause that catches it, and gating that
-branch on `isUndefined(inputValue)` silently stops `required` firing there.
+beta.4 implements exactly candidate B — `useController` sets an `_f._c` flag
+on Controller-managed fields, and `validateField`'s DOM-emptiness branch skips
+them:
 
-**B** keeps v8's new "`field.ref` is the real DOM node" behaviour while
-restoring v7's validation semantics, by recording that a field is
-Controller-managed (so form state, not the DOM, is authoritative):
+```js
+// v8.0.0-beta.4 — src/useController.ts (ref callback / mount effect)
+field._f._c = true;
 
-```diff
-  // src/useController.ts -- in the ref callback and the mount effect
-  if (field && field._f && elm) {
-    field._f.ref = _proxyRef.current;
-+   field._f.isController = true;
-  }
-
-  // src/logic/validateField.ts
-- (isHTMLElement(ref) && ref.value === '') ||
-+ (isHTMLElement(ref) && ref.value === '' && !isController) ||
-
-  // src/types/fields.ts -- Field._f
-+ isController?: boolean;
+// v8.0.0-beta.4 — src/logic/validateField.ts
+(isHTMLElement(ref) && ref.value === '' && !_c) ||
 ```
 
-Neither candidate affects the identity/loop specs, which is the clearest
-evidence that the two findings are independent: the identity churn is a
-deliberate design change, not a side effect of this one.
+This keeps v8's new "`field.ref` is the real DOM node" behaviour while
+restoring v7's validation semantics: for Controller-managed fields, form
+state — not the DOM — is authoritative.
+
+**A is a trap**, for the record: an empty `type="number"` field with
+`valueAsNumber` has a form value of `NaN`, not `''` — so the DOM branch is the
+*only* clause that catches it, and gating that branch on
+`isUndefined(inputValue)` silently stops `required` firing there.
+
+Neither fix affects the identity/loop specs, which is the clearest evidence
+that the two findings are independent — and indeed beta.4 fixed this one while
+the method re-binds remain.
 
 Environment: React 19.3.0, jsdom, Vitest. Reproduced on macOS / Node 22.
