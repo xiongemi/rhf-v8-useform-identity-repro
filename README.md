@@ -123,15 +123,27 @@ is kept so the suite stays safe to run against beta.3.)
 rather than a clean failure, which makes it easy to misattribute to the test
 runner.)
 
-## Is this intentional?
+## Is this intentional? — Yes, confirmed
 
-Plausibly — it looks like the immutability work for
-[#12298](https://github.com/react-hook-form/react-hook-form/issues/12298)
-(React Compiler correctness), since mutating a hook's return value is exactly
-what that issue is about. beta.4 removing only the object re-spread while
-keeping the per-render re-binds suggests the re-binds are deliberate.
+The maintainer [confirmed](https://github.com/react-hook-form/react-hook-form/pull/12333#issuecomment-5879069223)
+(2026-09-28) that the four method re-binds are **intentional and expected in
+v8**, done for React Compiler compatibility:
 
-If so, the request is just that it be called out as a ⚠️ breaking change in the
+> `useForm()` itself is now referentially stable again, but `watch`,
+> `getValues`, `getFieldState`, and `register` are intentionally rebound on
+> form updates for React Compiler compatibility.
+>
+> For this use case, where you want to react to form value changes inside an
+> effect without causing a render, `subscribe` should be used instead of
+> relying on `getValues` as an effect dependency.
+
+So the two remaining red specs in this repo document permanent v8 behaviour,
+not a bug awaiting a fix. The recommended migration is
+[`subscribe`](https://react-hook-form.com/docs/useform/subscribe) (or
+`control`-based equivalents) instead of listing these methods in dependency
+arrays.
+
+The remaining request is that it be called out as a ⚠️ breaking change in the
 migration guide: v7's docs describe these as memoized, `exhaustive-deps`
 actively tells you to write the dependency array that now breaks, and the
 failure mode is a silent re-run (or on beta.3, an infinite loop) rather than a
